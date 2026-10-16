@@ -4,6 +4,11 @@ clone_depth: 1
 max_jobs: 1
 skip_tags: true
 
+cache:
+  - app\native-module\target
+  - '%USERPROFILE%\.cargo\registry'
+  - app\resources\models
+
 environment:
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
@@ -22,6 +27,24 @@ install:
   - cmd: cd app
   - cmd: >-
       node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.devDependencies.eslint='9.25.1';const o=p.pnpm?.overrides||{};delete p.pnpm;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');fs.appendFileSync('pnpm-workspace.yaml','\noverrides:\n'+Object.entries(o).map(([k,v])=>'  '+k+': '+JSON.stringify(v)+'\n').join(''));"
+  - ps: |
+      @'
+      const fs = require('fs');
+      const p = 'native-module/src/speaker/windows.rs';
+      let s = fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+      const changes = [
+       ['pub fn stream(self) -> SpeakerStream {', 'pub fn stream(self) -> Result<SpeakerStream> {'],
+       ['        SpeakerStream {\n', '        Ok(SpeakerStream {\n'],
+       ['            data_ready,\n        }\n    }', '            data_ready,\n        })\n    }'],
+      ];
+      for (const [a,b] of changes) {
+       if (s.split(a).length !== 2) throw Error('Unexpected Windows audio source shape: '+a);
+       s = s.replace(a,b);
+      }
+      fs.writeFileSync(p,s);
+      console.log('Patched Windows SpeakerInput::stream to match the shared Result interface.');
+      '@ | Set-Content -Encoding UTF8 patch-windows-audio.cjs
+  - cmd: node patch-windows-audio.cjs
   - cmd: pnpm install --no-frozen-lockfile
 
 build_script:
