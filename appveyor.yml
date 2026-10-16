@@ -1,0 +1,45 @@
+version: '2.3.0-build{build}'
+image: Visual Studio 2022
+clone_depth: 1
+max_jobs: 1
+skip_tags: true
+
+environment:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+install:
+  - ps: Install-Product node 22 x64
+  - cmd: npm install --global pnpm@10
+  - ps: |
+      $ErrorActionPreference = 'Stop'
+      $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+      if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+        Invoke-WebRequest https://win.rustup.rs/x86_64 -OutFile "$env:TEMP\rustup-init.exe"
+        & "$env:TEMP\rustup-init.exe" -y --default-host x86_64-pc-windows-msvc --default-toolchain stable --profile minimal
+        if ($LASTEXITCODE -ne 0) { throw 'Rust install failed' }
+      }
+      Add-AppveyorMessage 'Rust toolchain available'
+  - cmd: set PATH=%USERPROFILE%\.cargo\bin;%PATH%
+  - cmd: rustup update stable --no-self-update
+  - cmd: rustup default stable-x86_64-pc-windows-msvc
+  - cmd: git init app
+  - cmd: git -C app remote add origin https://github.com/royisme/pikabaka.git
+  - cmd: git -C app fetch --depth 1 origin dce8163e0ab65f251bd6d696fd9d2f80d2298d5b
+  - cmd: git -C app checkout --detach FETCH_HEAD
+  - cmd: cd app
+  - cmd: >-
+      node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.devDependencies.eslint='9.25.1';const o=p.pnpm?.overrides||{};delete p.pnpm;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');fs.appendFileSync('pnpm-workspace.yaml','\noverrides:\n'+Object.entries(o).map(([k,v])=>'  '+k+': '+JSON.stringify(v)+'\n').join(''));"
+  - cmd: pnpm install --no-frozen-lockfile
+
+build_script:
+  - cmd: pnpm run verify
+  - cmd: pnpm run build:web:raw
+  - cmd: pnpm run build:electron:raw
+  - cmd: pnpm run build:native:raw
+  - cmd: pnpm exec electron-builder --win nsis portable --x64 --publish never
+
+test: off
+
+artifacts:
+  - path: app\release\*.exe
+    name: Pika-Windows-x64
